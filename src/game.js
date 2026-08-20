@@ -6,10 +6,11 @@ import {
   Engine,
   FreeCamera,
   HemisphericLight,
+  Ray,
   Scene,
   Vector3,
 } from "@babylonjs/core";
-import { MAP_SIZE, ISO_DIR } from "./config.js";
+import { CAM, MAP_SIZE } from "./config.js";
 import { clearanceToRoad, generateCity, inBounds } from "./city.js";
 import { hashSeed, mulberry32 } from "./rng.js";
 import { bakeGroundCanvas, createCitySurface, tileHeight } from "./terrain.js";
@@ -17,8 +18,11 @@ import { Player } from "./player.js";
 import { cloneTpl, createPlayer, loadTemplates, placeBuilding } from "./models.js";
 import { spawnTraffic, updateTraffic } from "./traffic.js";
 import { markOccluder, updateOcclusion } from "./occlusion.js";
+import { Controls } from "./controls.js";
 
-const CAM_DIST = 28;
+function clamp(v, a, b) {
+  return Math.min(b, Math.max(a, v));
+}
 
 export class Game {
   constructor(canvas) {
@@ -28,8 +32,8 @@ export class Game {
     this.scene.clearColor = Color4.FromHexString("#87b4d8ff");
     this.scene.fogMode = Scene.FOGMODE_LINEAR;
     this.scene.fogColor = Color3.FromHexString("#87b4d8");
-    this.scene.fogStart = 40;
-    this.scene.fogEnd = 90;
+    this.scene.fogStart = 28;
+    this.scene.fogEnd = 78;
     this.assets = [];
     this.templates = null;
     this.player = null;
@@ -40,20 +44,25 @@ export class Game {
     this.occluders = [];
     this.occludeActive = new Set();
     this.rng = Math.random;
-    this.orthoHalf = 11;
     this.seed = new URLSearchParams(window.location.search).get("seed") || String((Math.random() * 1e9) | 0);
     this.hudEl = document.getElementById("hud");
     if (this.hudEl) this.hudEl.textContent = "CARGANDO MODELOS 3D…";
 
-    this.camera = new FreeCamera("cam", Vector3.Zero(), this.scene);
-    this.camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
-    this.camera.minZ = 0.1;
-    this.camera.maxZ = 220;
-    this.camera.inputs.clear();
-    this.isoDir = new Vector3(ISO_DIR.x, ISO_DIR.y, ISO_DIR.z).normalize();
+    this.camYaw = Math.PI;
+    this.camPitch = CAM.pitchDefault;
+    this.camDist = CAM.distDefault;
     this.camTarget = Vector3.Zero();
-    this.camRotation = null;
-    this.camRotationQ = null;
+    this._camDesired = new Vector3();
+    this._camDir = new Vector3();
+    this._follow = new Vector3();
+
+    this.camera = new FreeCamera("cam", new Vector3(0, 8, -8), this.scene);
+    this.camera.mode = Camera.PERSPECTIVE_CAMERA;
+    this.camera.fov = CAM.fov;
+    this.camera.minZ = 0.12;
+    this.camera.maxZ = 180;
+    this.camera.inputs.clear();
+    this.camera.inertia = 0;
 
     this.hemi = new HemisphericLight("hemi", new Vector3(0.25, 1, 0.15), this.scene);
     this.hemi.diffuse = Color3.FromHexString("#f4efe4");
@@ -64,17 +73,26 @@ export class Game {
     this.sun.intensity = 0.85;
     this.sun.diffuse = Color3.FromHexString("#fff4d8");
 
+    this.controls = new Controls({
+      canvas,
+      joystick: document.getElementById("joystick"),
+      knob: document.getElementById("joystick-knob"),
+      lookStick: document.getElementById("look-stick"),
+      lookKnob: document.getElementById("look-knob"),
+    });
+
     window.addEventListener("resize", () => this.engine.resize());
-    canvas.addEventListener(
-      "wheel",
-      (e) => {
-        this.orthoHalf = Math.min(22, Math.max(6, this.orthoHalf * (e.deltaY > 0 ? 1.1 : 0.9)));
-        e.preventDefault();
-      },
-      { passive: false },
-    );
     window.addEventListener("keydown", (e) => {
       if (e.key.toLowerCase() === "n") this.rebuild(String((Math.random() * 1e9) | 0));
+    });
+    document.getElementById("btn-new")?.addEventListener("click", () => {
+      this.rebuild(String((Math.random() * 1e9) | 0));
+    });
+    document.getElementById("btn-zoom-in")?.addEventListener("click", () => {
+      this.camDist = clamp(this.camDist * 0.82, CAM.distMin, CAM.distMax);
+    });
+    document.getElementById("btn-zoom-out")?.addEventListener("click", () => {
+      this.camDist = clamp(this.camDist * 1.22, CAM.distMin, CAM.distMax);
     });
 
     loadTemplates(this.scene)
@@ -202,48 +220,86 @@ export class Game {
 
   snapCamera() {
     if (!this.player) return;
+    this.camYaw = this.player.angle;
+    this.camPitch = CAM.pitchDefault;
+    this.camDist = CAM.distDefault;
     this.camTarget.copyFrom(this.player.rig.root.position);
-    this.camera.position.copyFrom(this.camTarget).addInPlace(this.isoDir.scale(CAM_DIST));
-    this.camera.setTarget(this.camTarget);
-    this.camRotation = this.camera.rotation.clone();
-    this.camRotationQ = this.camera.rotationQuaternion?.clone() ?? null;
-    this.applyOrtho();
+    this.camTarget.y += CAM.lookY;
+    this.placeCamera();
   }
 
-  applyOrtho() {
-    const aspect = this.engine.getRenderWidth() / Math.max(1, this.engine.getRenderHeight());
-    this.camera.orthoTop = this.orthoHalf;
-    this.camera.orthoBottom = -this.orthoHalf;
-    this.camera.orthoRight = this.orthoHalf * aspect;
-    this.camera.orthoLeft = -this.orthoHalf * aspect;
+  placeCamera() {
+    const cosp = Math.cos(this.camPitch);
+    const dist = this.camDist;
+    this._camDesired.set(
+      this.camTarget.x + Math.sin(this.camYaw) * cosp * dist,
+      this.camTarget.y + Math.sin(this.camPitch) * dist,
+      this.camTarget.z + Math.cos(this.camYaw) * cosp * dist,
+    );
+    this._camDesired.y = Math.max(0.42, this._camDesired.y);
+
+    const maxD = Vector3.Distance(this.camTarget, this._camDesired);
+    const ray = Ray.CreateNewFromTo(this.camTarget, this._camDesired);
+    const hit = this.scene.pickWithRay(ray, (mesh) => !!mesh.metadata?.occluderRoot);
+    if (hit?.hit && hit.distance < maxD - 0.15) {
+      const d = Math.max(1.35, hit.distance - 0.4);
+      this._camDir.copyFrom(this._camDesired).subtractInPlace(this.camTarget);
+      const len = this._camDir.length();
+      if (len > 0.001) this._camDir.scaleInPlace(d / len);
+      this.camera.position.copyFrom(this.camTarget).addInPlace(this._camDir);
+    } else {
+      this.camera.position.copyFrom(this._camDesired);
+    }
+    this.camera.setTarget(this.camTarget);
+  }
+
+  wishFromCamera(move) {
+    const fx = -Math.sin(this.camYaw);
+    const fz = -Math.cos(this.camYaw);
+    const rx = Math.cos(this.camYaw);
+    const rz = -Math.sin(this.camYaw);
+    return {
+      x: fx * move.forward + rx * move.strafe,
+      z: fz * move.forward + rz * move.strafe,
+    };
   }
 
   update(dt) {
     if (!this.player || !this.city) return;
     const clamped = Math.min(dt, 0.05);
-    this.player.update(clamped, this.city, this.blockers.concat(this.movers));
+    const move = this.controls.getMove();
+    const wish = this.wishFromCamera(move);
+    this.player.update(clamped, this.city, this.blockers.concat(this.movers), wish.x, wish.z);
     this.movers = updateTraffic(this.city, this.traffic, clamped, this.rng);
     this.surface?.update(clamped);
-    Vector3.LerpToRef(
-      this.camTarget,
-      this.player.rig.root.position,
-      1 - Math.pow(0.001, clamped),
-      this.camTarget,
+
+    const look = this.controls.consumeLook();
+    const sens = this.controls.isTouch() ? CAM.touchLookSens : CAM.lookSens;
+    this.camYaw += look.x * sens + this.controls.lookStickX * CAM.stickLook * clamped;
+    this.camPitch = clamp(
+      this.camPitch + look.y * sens + this.controls.lookStickY * CAM.stickLook * clamped,
+      CAM.pitchMin,
+      CAM.pitchMax,
     );
-    this.camera.position.copyFrom(this.camTarget).addInPlace(this.isoDir.scale(CAM_DIST));
-    if (this.camRotationQ) {
-      if (!this.camera.rotationQuaternion) this.camera.rotationQuaternion = this.camRotationQ.clone();
-      else this.camera.rotationQuaternion.copyFrom(this.camRotationQ);
-    } else if (this.camRotation) {
-      this.camera.rotation.copyFrom(this.camRotation);
-    }
-    this.applyOrtho();
+    const zoom = this.controls.consumeZoom();
+    if (zoom) this.camDist = clamp(this.camDist * Math.exp(zoom * 0.085), CAM.distMin, CAM.distMax);
+
+    const pos = this.player.rig.root.position;
+    this._follow.set(pos.x, pos.y + CAM.lookY, pos.z);
+    Vector3.LerpToRef(this.camTarget, this._follow, 1 - Math.pow(0.0008, clamped), this.camTarget);
+    this.placeCamera();
     updateOcclusion(this.scene, this.camera, this.player.rig.root, this.occludeActive, clamped);
     this.updateHud();
   }
 
   updateHud() {
     if (!this.hudEl) return;
-    this.hudEl.innerHTML = `ISOCITY 3D&nbsp;&nbsp;seed ${this.seed}<br>WASD / flechas para caminar<br>N nueva ciudad&nbsp;&nbsp;rueda: zoom&nbsp;&nbsp;${MAP_SIZE}×${MAP_SIZE}`;
+    const mobile = document.body.classList.contains("touch-on");
+    const html = mobile
+      ? `ISOCITY 3D&nbsp;&nbsp;seed ${this.seed}<br>${MAP_SIZE}×${MAP_SIZE}`
+      : `ISOCITY 3D&nbsp;&nbsp;seed ${this.seed}<br>WASD / flechas para caminar&nbsp;&nbsp;arrastrar: mirar<br>N nueva ciudad&nbsp;&nbsp;rueda: zoom&nbsp;&nbsp;${MAP_SIZE}×${MAP_SIZE}`;
+    if (html === this._hudLast) return;
+    this._hudLast = html;
+    this.hudEl.innerHTML = html;
   }
 }

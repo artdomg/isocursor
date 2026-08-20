@@ -18,9 +18,16 @@ export const WALKABLE = new Set([
 
 export const PLAYER_SPEED = 3.15;
 
-/** 2:1 dimetric (same as the old 64×32 tiles): 45° yaw, 30° elevation. */
-export const ISO_DIR = {
-  x: 1,
-  y: Math.SQRT2 * Math.tan(Math.PI / 6),
-  z: 1,
+export const CAM = {
+  distMin: 3.4,
+  distMax: 16,
+  distDefault: 7.4,
+  pitchMin: 0.14,
+  pitchMax: 1.22,
+  pitchDefault: 0.46,
+  lookY: 0.66,
+  fov: 0.95,
+  lookSens: 0.0054,
+  touchLookSens: 0.0072,
+  stickLook: 2.55,
 };
