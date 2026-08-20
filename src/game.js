@@ -256,8 +256,8 @@ export class Game {
   wishFromCamera(move) {
     const fx = -Math.sin(this.camYaw);
     const fz = -Math.cos(this.camYaw);
-    const rx = Math.cos(this.camYaw);
-    const rz = -Math.sin(this.camYaw);
+    const rx = -Math.cos(this.camYaw);
+    const rz = Math.sin(this.camYaw);
     return {
       x: fx * move.forward + rx * move.strafe,
       z: fz * move.forward + rz * move.strafe,
