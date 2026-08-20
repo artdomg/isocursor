@@ -2,7 +2,12 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>IsoCity</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,16 +24,26 @@
         height: 100%;
         overflow: hidden;
         background: #0b1020;
+        touch-action: none;
+        overscroll-behavior: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
       }
       #game {
         width: 100%;
         height: 100%;
         display: block;
+        cursor: grab;
+        touch-action: none;
+      }
+      #game.looking {
+        cursor: grabbing;
       }
       #hud {
         position: absolute;
-        top: 12px;
-        left: 12px;
+        top: max(12px, env(safe-area-inset-top));
+        left: max(12px, env(safe-area-inset-left));
         z-index: 5;
         pointer-events: none;
         font-family: "Press Start 2P", monospace;
@@ -41,11 +56,145 @@
           0 2px #161014,
           0 -2px #161014;
       }
+      #touch-ui {
+        display: none;
+        position: absolute;
+        inset: 0;
+        z-index: 6;
+        pointer-events: none;
+      }
+      body.touch-on #touch-ui {
+        display: block;
+      }
+      @media (hover: none) and (pointer: coarse) {
+        #touch-ui {
+          display: block;
+        }
+      }
+      .touch-top {
+        position: absolute;
+        top: max(10px, env(safe-area-inset-top));
+        right: max(10px, env(safe-area-inset-right));
+        display: flex;
+        gap: 8px;
+        pointer-events: auto;
+      }
+      .touch-top button {
+        font-family: "Press Start 2P", monospace;
+        font-size: 9px;
+        line-height: 1;
+        color: #f4efe4;
+        background: rgba(22, 16, 20, 0.62);
+        border: 3px solid #f4efe4;
+        padding: 10px 12px;
+        min-width: 42px;
+        min-height: 42px;
+        cursor: pointer;
+        text-shadow:
+          2px 0 #161014,
+          -2px 0 #161014,
+          0 2px #161014,
+          0 -2px #161014;
+      }
+      .touch-top button:active {
+        background: rgba(244, 239, 228, 0.28);
+      }
+      .stick {
+        position: absolute;
+        width: 132px;
+        height: 132px;
+        pointer-events: auto;
+        touch-action: none;
+      }
+      .stick-left {
+        left: max(14px, env(safe-area-inset-left));
+        bottom: max(22px, env(safe-area-inset-bottom));
+      }
+      .stick-right {
+        right: max(14px, env(safe-area-inset-right));
+        bottom: max(22px, env(safe-area-inset-bottom));
+      }
+      .stick-ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 3px solid #f4efe4;
+        background: rgba(22, 16, 20, 0.38);
+        box-shadow: 0 0 0 2px rgba(22, 16, 20, 0.55);
+        pointer-events: none;
+      }
+      .stick-knob {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 54px;
+        height: 54px;
+        margin: -27px 0 0 -27px;
+        border-radius: 50%;
+        background: rgba(244, 239, 228, 0.88);
+        border: 3px solid #161014;
+        box-shadow: 0 3px 0 #161014;
+        pointer-events: none;
+        will-change: transform;
+      }
+      .stick-label {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -18px;
+        text-align: center;
+        font-family: "Press Start 2P", monospace;
+        font-size: 7px;
+        color: #f4efe4;
+        text-shadow:
+          2px 0 #161014,
+          -2px 0 #161014,
+          0 2px #161014,
+          0 -2px #161014;
+        pointer-events: none;
+      }
+      @media (max-width: 420px), (max-height: 420px) {
+        .stick {
+          width: 108px;
+          height: 108px;
+        }
+        .stick-knob {
+          width: 44px;
+          height: 44px;
+          margin: -22px 0 0 -22px;
+        }
+        .touch-top button {
+          font-size: 8px;
+          padding: 8px 9px;
+          min-width: 36px;
+          min-height: 36px;
+        }
+        #hud {
+          font-size: 8px;
+        }
+      }
     </style>
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="hud">ISOCITY 3D</div>
+    <div id="touch-ui">
+      <div class="touch-top">
+        <button type="button" id="btn-zoom-in" aria-label="Acercar">+</button>
+        <button type="button" id="btn-zoom-out" aria-label="Alejar">−</button>
+        <button type="button" id="btn-new">NUEVA</button>
+      </div>
+      <div id="joystick" class="stick stick-left" aria-label="Mover">
+        <div class="stick-ring"></div>
+        <div id="joystick-knob" class="stick-knob"></div>
+        <div class="stick-label">MOVER</div>
+      </div>
+      <div id="look-stick" class="stick stick-right" aria-label="Mirar">
+        <div class="stick-ring"></div>
+        <div id="look-knob" class="stick-knob"></div>
+        <div class="stick-label">MIRAR</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 import { Ray, Vector3 } from "@babylonjs/core";
 
-const FADE = 0.32;
+const FADE = 0.2;
 const _chest = new Vector3();
 const _head = new Vector3();
 const _side = new Vector3();

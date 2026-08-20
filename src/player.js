@@ -3,16 +3,11 @@ import { inBounds, isWalkable, tileAt } from "./city.js";
 import { animateWalk } from "./models.js";
 import { tileHeight } from "./terrain.js";
 
-const keys = new Set();
-if (typeof window !== "undefined" && !window.__isoKeysBound) {
-  window.__isoKeysBound = true;
-  window.addEventListener("keydown", (e) => {
-    keys.add(e.key.toLowerCase());
-    if (["arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) {
-      e.preventDefault();
-    }
-  });
-  window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+function lerpAngle(from, to, t) {
+  let diff = to - from;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return from + diff * t;
 }
 
 export class Player {
@@ -28,32 +23,17 @@ export class Player {
     this.sync();
   }
 
-  update(dt, city, blockers) {
-    let ix = 0;
-    let iy = 0;
-    if (keys.has("w") || keys.has("arrowup")) {
-      ix -= 1;
-      iy -= 1;
-    }
-    if (keys.has("s") || keys.has("arrowdown")) {
-      ix += 1;
-      iy += 1;
-    }
-    if (keys.has("a") || keys.has("arrowleft")) {
-      ix += 1;
-      iy -= 1;
-    }
-    if (keys.has("d") || keys.has("arrowright")) {
-      ix -= 1;
-      iy += 1;
-    }
+  update(dt, city, blockers, wishX = 0, wishZ = 0) {
+    let ix = wishX;
+    let iy = wishZ;
 
     this.moving = ix !== 0 || iy !== 0;
     if (this.moving) {
       const len = Math.hypot(ix, iy);
       ix /= len;
       iy /= len;
-      this.angle = Math.atan2(ix, iy);
+      const want = Math.atan2(ix, iy);
+      this.angle = lerpAngle(this.angle, want, Math.min(1, dt * 14));
       if (Math.abs(ix) > Math.abs(iy)) this.dir = ix > 0 ? "se" : "nw";
       else this.dir = iy > 0 ? "sw" : "ne";
 
